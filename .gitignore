@@ -1,0 +1,23 @@
+# ─── Dependencies ─────────────────────────────────────────────
+node_modules/
+
+# ─── Environment (API keys, secrets) ─────────────────────────
+.env
+
+# ─── Data sensitif (jangan pernah di-commit!) ────────────────
+accounts.json
+vcc.txt
+vcc.used.txt
+proxy.usa.txt
+proxy.fr.txt
+
+# ─── Debug & temp files ───────────────────────────────────────
+debug-*.png
+debug-*.html
+*.mjs.bak
+/tmp/
+
+# ─── OS / Editor ──────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
