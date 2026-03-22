@@ -9,6 +9,7 @@ import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { existsSync } from "fs";
 import path from "path";
 import os from "os";
+import { HEADLESS } from "../config.js";
 
 // ─── Chrome Finder ────────────────────────────────────────────────────────────
 
@@ -36,7 +37,8 @@ export function findChrome() {
 // ─── Browser Launch ───────────────────────────────────────────────────────────
 
 /**
- * Launch browser headless dengan stealth plugin.
+ * Launch browser dengan stealth plugin.
+ * headless dikontrol dari config.json
  * @returns {Promise<{browser, page}>}
  */
 export async function launchBrowser() {
@@ -44,7 +46,7 @@ export async function launchBrowser() {
 
   const browser = await puppeteerExtra.launch({
     executablePath: findChrome(),
-    headless: true,
+    headless: HEADLESS,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",

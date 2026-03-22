@@ -6,7 +6,7 @@
 
 **Alat CLI untuk otomatisasi pembuatan akun ChatGPT secara massal via browser headless.**
 
-![Version](https://img.shields.io/badge/Version-2.0.0-blueviolet)
+![Version](https://img.shields.io/badge/Version-3.0.0-blueviolet)
 ![Node](https://img.shields.io/badge/Node.js-v18+-green)
 ![Runtime](https://img.shields.io/badge/Runtime-Puppeteer-orange)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
@@ -27,11 +27,14 @@
 
 - Pembuatan akun ChatGPT secara otomatis via web flow resmi
 - Pemrosesan paralel hingga 5 akun secara bersamaan (batch processing)
+- **Live progress bar** per-akun dengan tampilan ANSI real-time
 - Verifikasi OTP otomatis dari inbox email via API
-- Penyimpanan hasil akun ke `data/accounts.json`
-- Ekspor daftar akun ke `data/result.txt` (format: email TAB nama)
-- Tampilan CLI yang informatif dengan progress per langkah
-- Mekanisme retry otomatis (hingga 3x per slot) jika terjadi kegagalan
+- **Nama random realistis** menggunakan faker.js (tanpa simbol)
+- **Email unik** — LocalDB memastikan tidak ada email duplikat antar sesi
+- **Suffix email opsional** — tambahkan nama di belakang email (contoh: `abc123wahid@domain.xyz`)
+- Auto-retry tanpa batas jika gagal (buat akun baru otomatis, tanpa tampilan error)
+- Penyimpanan hasil ke `data/accounts.json` dan auto-ekspor ke `data/result.txt`
+- Konfigurasi terpusat via `config.json` (password, domain, headless, OTP, dll)
 - Stealth mode browser untuk menghindari deteksi bot
 
 ## Persyaratan
@@ -43,91 +46,100 @@
 ## Instalasi
 
 ```bash
-git clone https://github.com/username/chatgpt-account-creator.git
+git clone https://github.com/alhifnywahid/chatgpt-account-creator.git
 cd chatgpt-account-creator
 npm install
 ```
 
-Salin file konfigurasi dan sesuaikan isinya:
-
-```bash
-cp .env.example .env
-```
-
 ## Konfigurasi
 
-Edit file `.env`:
+Edit file `config.json` di root project:
 
-```env
-# Domain email yang digunakan untuk pembuatan akun (pisahkan dengan koma)
-DOMAINS=plexai.xyz
+```json
+{
+  "password": "@Gopretstudio88",
+  "domains": ["plexai.xyz"],
+  "batchSize": 5,
+  "headless": true,
+  "otp": {
+    "timeout": 90000,
+    "pollInterval": 4000,
+    "apiUrl": "https://mail.gopretstudio.com",
+    "apiKey": "GOMAIL-xxxxx"
+  },
+  "paths": {
+    "accounts": "./data/accounts.json",
+    "result": "./data/result.txt",
+    "emailDb": "./data/email-db.json"
+  }
+}
 ```
 
-Untuk mengubah password atau jumlah akun per batch, edit `src/config.js`:
-
-```js
-export const PASSWORD = "@Gopretstudio88"; // password untuk semua akun
-export const BATCH_SIZE = 5; // maksimal akun diproses bersamaan
-export const MAX_RETRY = 3; // percobaan ulang jika gagal
-```
+| Opsi | Deskripsi |
+|------|-----------|
+| `password` | Password untuk semua akun yang dibuat |
+| `domains` | Daftar domain email (array) |
+| `batchSize` | Maksimal akun diproses bersamaan |
+| `headless` | `true` = browser tidak terlihat, `false` = browser ditampilkan |
+| `otp.timeout` | Timeout polling OTP dalam milidetik |
+| `otp.pollInterval` | Interval polling inbox dalam milidetik |
+| `otp.apiUrl` | URL API email server |
+| `otp.apiKey` | API key untuk email server |
 
 ## Penggunaan
 
 ### Membuat Akun
 
 ```bash
-# Buat 1 akun (default)
 npm run create
-
-# Buat N akun sekaligus
-npm run create -- 10
-npm run create -- 25
-
-# Buat akun dengan email tertentu
-npm run create -- --email nama@domain.com
 ```
 
-### Melihat Hasil
+Sistem akan bertanya secara interaktif:
 
-```bash
-# Tampilkan daftar semua akun tersimpan
-npm run list
-
-# Tampilkan statistik (total, verified, pending, gagal)
-npm run stats
+```
+🔢 Mau buat berapa akun? 5
+📝 Apakah ada penambahan nama di belakang email? (kosongkan jika tidak): wahid
 ```
 
-### Ekspor Data
+Kemudian tampil live progress bar:
+
+```
+  ✅ abc123wahid@plexai.xyz  │ ████████████████████ 100% │ Berhasil ✅
+  ⏳ def456wahid@plexai.xyz  │ ██████████░░░░░░░░░░  50% │ Menunggu kode OTP...
+  ⏸  —                       │ ░░░░░░░░░░░░░░░░░░░░   0% │ Menunggu...
+```
+
+### Ekspor Manual
 
 ```bash
-# Ekspor ke data/result.txt (FORMAT: email[TAB]nama)
+# Ekspor ulang ke data/result.txt (FORMAT: email[TAB]nama)
 npm run convert
 ```
+
+> **Note:** Ekspor ke `result.txt` sudah otomatis dilakukan setiap selesai `npm run create`.
 
 ## Struktur Project
 
 ```
 chatgpt-account-creator/
 ├── index.js              # CLI entry point (router)
+├── config.json           # Semua konfigurasi terpusat
 ├── package.json
-├── .env                  # Konfigurasi environment
-├── .env.example
 ├── data/
-│   ├── accounts.json     # Hasil akun yang tersimpan
-│   └── result.txt        # Output ekspor
+│   ├── accounts.json     # Hasil akun (direset setiap create baru)
+│   ├── result.txt        # Output ekspor (direset setiap create baru)
+│   └── email-db.json     # LocalDB email unik (persistent)
 └── src/
-    ├── config.js         # Semua konstanta & konfigurasi
+    ├── config.js         # Wrapper baca config.json
     ├── commands/
-    │   ├── create.js     # Logika pembuatan akun (batch parallel)
-    │   ├── list.js       # Tampilkan daftar akun
-    │   ├── stats.js      # Statistik akun
+    │   ├── create.js     # Logika pembuatan akun (batch + progress bar)
     │   └── convert.js    # Ekspor ke result.txt
     └── lib/
-        ├── browser.js    # Setup browser Puppeteer + helper functions
+        ├── browser.js    # Setup browser Puppeteer + helpers
         ├── register.js   # 6-step flow registrasi ChatGPT
         ├── otp.js        # Polling OTP dari inbox email
-        ├── email-gen.js  # Generate email & nama acak
-        └── storage.js    # Read/write data/accounts.json
+        ├── email-gen.js  # Generate email & nama (faker.js)
+        └── storage.js    # Read/write accounts + LocalDB email
 ```
 
 ## Alur Kerja Registrasi
@@ -137,9 +149,9 @@ Setiap akun diproses melalui 6 langkah:
 1. Setup OAuth - ambil CSRF token, dapatkan URL auth0
 2. Isi password - navigasi ke halaman registrasi, isi password
 3. Verifikasi OTP - polling inbox otomatis, isi kode 6 digit
-4. Isi profil - nama lengkap dan tanggal lahir acak (2000-2005)
+4. Isi profil - nama lengkap (faker.js) dan tanggal lahir acak (2000-2005)
 5. Ambil session - ekstrak access token dari sesi aktif
-6. Simpan & selesai - data akun disimpan ke `accounts.json`
+6. Simpan & selesai - data akun disimpan ke `accounts.json` & `result.txt`
 
 ## Format Output
 
@@ -148,9 +160,9 @@ Setiap akun diproses melalui 6 langkah:
 ```json
 [
   {
-    "email": "user@plexai.xyz",
+    "email": "abc123wahid@plexai.xyz",
     "password": "@Gopretstudio88",
-    "fullName": "Alex Smith",
+    "fullName": "Isabella Thompson",
     "birthdate": "2002-05-14",
     "status": "verified",
     "userId": "...",
@@ -163,15 +175,16 @@ Setiap akun diproses melalui 6 langkah:
 ### `data/result.txt`
 
 ```
-user@plexai.xyz    Alex Smith
-user2@plexai.xyz   Jordan Davis
+abc123wahid@plexai.xyz    Isabella Thompson
+def456wahid@plexai.xyz    Marcus Chen
 ```
 
 ## Catatan
 
-- Browser berjalan dalam mode headless (tidak terlihat di layar)
-- OTP diambil otomatis; jika gagal, akan meminta input manual di terminal
-- Hanya akun free yang dibuat - tidak ada proses pembayaran atau kartu kredit
+- Browser default berjalan headless; ubah `"headless": false` di `config.json` untuk menampilkan
+- Jika ada kegagalan di step manapun, sistem otomatis membuat akun baru tanpa menampilkan error
+- File `data/email-db.json` menyimpan semua email yang pernah digunakan (tidak pernah dihapus)
+- Hanya akun free yang dibuat — tidak ada proses pembayaran atau kartu kredit
 - Pastikan domain email yang digunakan mendukung catchall/API inbox
 
 ## Dukungan

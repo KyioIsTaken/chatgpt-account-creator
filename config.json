@@ -1,0 +1,17 @@
+{
+  "password": "@Gopretstudio88",
+  "domains": ["plexai.xyz"],
+  "batchSize": 5,
+  "headless": true,
+  "otp": {
+    "timeout": 90000,
+    "pollInterval": 4000,
+    "apiUrl": "https://mail.gopretstudio.com",
+    "apiKey": "GOMAIL-FqcmbaAGbPnwHIxKElNq"
+  },
+  "paths": {
+    "accounts": "./data/accounts.json",
+    "result": "./data/result.txt",
+    "emailDb": "./data/email-db.json"
+  }
+}

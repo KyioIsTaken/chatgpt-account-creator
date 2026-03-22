@@ -6,7 +6,7 @@
 
 **A CLI tool for bulk automation of ChatGPT account creation via headless browser.**
 
-![Version](https://img.shields.io/badge/Version-2.0.0-blueviolet)
+![Version](https://img.shields.io/badge/Version-3.0.0-blueviolet)
 ![Node](https://img.shields.io/badge/Node.js-v18+-green)
 ![Runtime](https://img.shields.io/badge/Runtime-Puppeteer-orange)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
@@ -27,11 +27,14 @@
 
 - Automated ChatGPT account creation via the official web registration flow
 - Parallel processing of up to 5 accounts simultaneously (batch processing)
+- **Live progress bar** per-account with real-time ANSI terminal display
 - Automatic OTP verification from email inbox via API polling
-- Account data storage to `data/accounts.json`
-- Export account list to `data/result.txt` (format: email TAB name)
-- Informative CLI output with per-step progress logging
-- Automatic retry mechanism (up to 3x per slot) on failure
+- **Realistic random names** using faker.js (symbols automatically stripped)
+- **Unique emails** — LocalDB ensures no duplicate emails across sessions
+- **Optional email suffix** — append a name to the email (e.g. `abc123wahid@domain.xyz`)
+- Unlimited auto-retry on failure (silently creates a new account, no errors shown)
+- Results saved to `data/accounts.json` and auto-exported to `data/result.txt`
+- Centralized configuration via `config.json` (password, domain, headless, OTP, etc.)
 - Browser stealth mode to avoid bot detection
 
 ## Requirements
@@ -43,91 +46,100 @@
 ## Installation
 
 ```bash
-git clone https://github.com/username/chatgpt-account-creator.git
+git clone https://github.com/alhifnywahid/chatgpt-account-creator.git
 cd chatgpt-account-creator
 npm install
 ```
 
-Copy the configuration template and adjust as needed:
-
-```bash
-cp .env.example .env
-```
-
 ## Configuration
 
-Edit `.env`:
+Edit `config.json` in the project root:
 
-```env
-# Email domain used for account creation (comma-separated for multiple)
-DOMAINS=plexai.xyz
+```json
+{
+  "password": "@Gopretstudio88",
+  "domains": ["plexai.xyz"],
+  "batchSize": 5,
+  "headless": true,
+  "otp": {
+    "timeout": 90000,
+    "pollInterval": 4000,
+    "apiUrl": "https://mail.gopretstudio.com",
+    "apiKey": "GOMAIL-xxxxx"
+  },
+  "paths": {
+    "accounts": "./data/accounts.json",
+    "result": "./data/result.txt",
+    "emailDb": "./data/email-db.json"
+  }
+}
 ```
 
-To change the password, batch size, or retry limit, edit `src/config.js`:
-
-```js
-export const PASSWORD = "@Gopretstudio88"; // password for all accounts
-export const BATCH_SIZE = 5; // max accounts processed in parallel
-export const MAX_RETRY = 3; // retry attempts per slot on failure
-```
+| Option | Description |
+|--------|-------------|
+| `password` | Password used for all created accounts |
+| `domains` | List of email domains (array) |
+| `batchSize` | Max accounts processed in parallel |
+| `headless` | `true` = invisible browser, `false` = visible browser window |
+| `otp.timeout` | OTP polling timeout in milliseconds |
+| `otp.pollInterval` | Inbox polling interval in milliseconds |
+| `otp.apiUrl` | Email server API URL |
+| `otp.apiKey` | Email server API key |
 
 ## Usage
 
 ### Creating Accounts
 
 ```bash
-# Create 1 account (default)
 npm run create
-
-# Create N accounts at once
-npm run create -- 10
-npm run create -- 25
-
-# Create an account with a specific email
-npm run create -- --email name@domain.com
 ```
 
-### Viewing Results
+The system will ask interactively:
 
-```bash
-# Display all saved accounts
-npm run list
-
-# Display statistics (total, verified, pending, failed)
-npm run stats
+```
+🔢 Mau buat berapa akun? 5
+📝 Apakah ada penambahan nama di belakang email? (kosongkan jika tidak): wahid
 ```
 
-### Exporting Data
+Then displays a live progress bar:
+
+```
+  ✅ abc123wahid@plexai.xyz  │ ████████████████████ 100% │ Berhasil ✅
+  ⏳ def456wahid@plexai.xyz  │ ██████████░░░░░░░░░░  50% │ Menunggu kode OTP...
+  ⏸  —                       │ ░░░░░░░░░░░░░░░░░░░░   0% │ Menunggu...
+```
+
+### Manual Export
 
 ```bash
-# Export to data/result.txt (FORMAT: email[TAB]name)
+# Re-export to data/result.txt (FORMAT: email[TAB]name)
 npm run convert
 ```
+
+> **Note:** Export to `result.txt` is already done automatically after every `npm run create`.
 
 ## Project Structure
 
 ```
 chatgpt-account-creator/
 ├── index.js              # CLI entry point (command router)
+├── config.json           # All configuration centralized
 ├── package.json
-├── .env                  # Environment configuration
-├── .env.example
 ├── data/
-│   ├── accounts.json     # Stored account results
-│   └── result.txt        # Export output
+│   ├── accounts.json     # Account results (reset on each create)
+│   ├── result.txt        # Export output (reset on each create)
+│   └── email-db.json     # LocalDB unique emails (persistent)
 └── src/
-    ├── config.js         # All constants & configuration
+    ├── config.js         # Wrapper for reading config.json
     ├── commands/
-    │   ├── create.js     # Account creation logic (batch parallel)
-    │   ├── list.js       # Display account list
-    │   ├── stats.js      # Account statistics
+    │   ├── create.js     # Account creation logic (batch + progress bar)
     │   └── convert.js    # Export to result.txt
     └── lib/
-        ├── browser.js    # Puppeteer browser setup + helper functions
+        ├── browser.js    # Puppeteer browser setup + helpers
         ├── register.js   # 6-step ChatGPT registration flow
         ├── otp.js        # OTP polling from email inbox
-        ├── email-gen.js  # Random email & name generator
-        └── storage.js    # Read/write data/accounts.json
+        ├── email-gen.js  # Email & name generator (faker.js)
+        └── storage.js    # Read/write accounts + LocalDB email
 ```
 
 ## Registration Flow
@@ -137,9 +149,9 @@ Each account is processed through 6 steps:
 1. OAuth setup - fetch CSRF token, obtain auth0 redirect URL
 2. Password entry - navigate to registration page, fill in password
 3. OTP verification - auto-poll inbox, enter the 6-digit code
-4. Profile setup - full name and random date of birth (2000-2005)
+4. Profile setup - full name (faker.js) and random date of birth (2000-2005)
 5. Session retrieval - extract access token from active session
-6. Save & done - account data is saved to `accounts.json`
+6. Save & done - account data saved to `accounts.json` & `result.txt`
 
 ## Output Format
 
@@ -148,9 +160,9 @@ Each account is processed through 6 steps:
 ```json
 [
   {
-    "email": "user@plexai.xyz",
+    "email": "abc123wahid@plexai.xyz",
     "password": "@Gopretstudio88",
-    "fullName": "Alex Smith",
+    "fullName": "Isabella Thompson",
     "birthdate": "2002-05-14",
     "status": "verified",
     "userId": "...",
@@ -163,15 +175,16 @@ Each account is processed through 6 steps:
 ### `data/result.txt`
 
 ```
-user@plexai.xyz    Alex Smith
-user2@plexai.xyz   Jordan Davis
+abc123wahid@plexai.xyz    Isabella Thompson
+def456wahid@plexai.xyz    Marcus Chen
 ```
 
 ## Notes
 
-- The browser runs in headless mode (no visible window)
-- OTP is fetched automatically; if it fails, manual input is prompted in the terminal
-- Only free accounts are created - no payment or credit card information is used
+- Browser runs headless by default; set `"headless": false` in `config.json` to show the window
+- On any failure at any step, the system automatically creates a new account without displaying errors
+- `data/email-db.json` stores all previously used emails (never deleted)
+- Only free accounts are created — no payment or credit card information is used
 - Ensure your email domain supports catchall addresses or an inbox API
 
 ## Support

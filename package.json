@@ -1,12 +1,10 @@
 {
   "name": "gpt-automation",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Otomatisasi pembuatan akun ChatGPT secara bulk via browser headless",
   "main": "index.js",
   "scripts": {
     "create": "node index.js create",
-    "list": "node index.js list",
-    "stats": "node index.js stats",
     "convert": "node index.js convert"
   },
   "keywords": [
@@ -18,9 +16,9 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@faker-js/faker": "^9.6.0",
     "chalk": "^5.6.2",
     "cli-table3": "^0.6.5",
-    "dotenv": "^17.3.1",
     "puppeteer-core": "^24.38.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"

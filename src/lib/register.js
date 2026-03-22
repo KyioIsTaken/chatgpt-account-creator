@@ -9,10 +9,10 @@
  * Step 4: Isi nama & tanggal lahir
  * Step 5: Ambil session credentials
  * Step 6: Return hasil & tutup browser
+ *
+ * Progress dilaporkan via onProgress(step, message) callback.
  */
 
-import chalk from "chalk";
-import Table from "cli-table3";
 import {
   launchBrowser,
   waitForAnySelector,
@@ -21,51 +21,28 @@ import {
 } from "./browser.js";
 
 const CHATGPT_BASE = "https://chatgpt.com";
-const TOTAL_STEPS = 6;
-
-function log(step, msg, status = "ok") {
-  const icon =
-    status === "ok"
-      ? chalk.green("✓")
-      : status === "wait"
-        ? chalk.yellow("…")
-        : chalk.red("✗");
-  process.stdout.write(
-    `\r  [${step}/${TOTAL_STEPS}] ${icon} ${msg}               \n`,
-  );
-}
+export const TOTAL_STEPS = 6;
 
 /**
  * Registrasi akun ChatGPT.
  * @param {{ email, password, fullName, firstName, lastName }} account
- * @param {{ askOtpFn: Function }} opts
+ * @param {{ askOtpFn: Function, onProgress?: Function }} opts
  * @returns {Promise<Object>} data akun hasil registrasi
  */
 export async function registerAccount(account, opts = {}) {
   const { email, password, fullName } = account;
-  const { askOtpFn } = opts;
+  const { askOtpFn, onProgress } = opts;
 
+  const progress = (step, msg) => {
+    if (onProgress) onProgress(step, msg);
+  };
+
+  progress(0, "Launching browser...");
   const { browser, page } = await launchBrowser();
-
-  // Tampilkan info akun dalam tabel
-  const table = new Table({
-    head: [
-      chalk.cyan.bold("EMAIL"),
-      chalk.cyan.bold("PASSWORD"),
-      chalk.cyan.bold("NAMA"),
-    ],
-    style: { head: [], border: ["cyan"] },
-    colWidths: [30, 22, 22],
-  });
-  table.push([email, password, fullName]);
-  console.log(table.toString());
-  console.log("");
 
   try {
     // ── Step 1: Setup OAuth & buka halaman password ───────────────────────
-    process.stdout.write(
-      `  [1/${TOTAL_STEPS}] … Setup OAuth & buka halaman password`,
-    );
+    progress(1, "Setup OAuth & buka halaman password");
 
     await page.goto(CHATGPT_BASE, {
       waitUntil: "domcontentloaded",
@@ -114,10 +91,10 @@ export async function registerAccount(account, opts = {}) {
       waitUntil: "networkidle0",
       timeout: 30000,
     });
-    log(1, 'Halaman "Create a password" terbuka', "ok");
+    progress(1, 'Halaman "Create a password" terbuka');
 
     // ── Step 2: Isi password ──────────────────────────────────────────────
-    process.stdout.write(`  [2/${TOTAL_STEPS}] … Isi password`);
+    progress(2, "Mengisi password...");
 
     const pwFound = await waitForAnySelector(
       page,
@@ -130,7 +107,6 @@ export async function registerAccount(account, opts = {}) {
     );
 
     if (!pwFound) {
-      await page.screenshot({ path: "debug-no-password.png", fullPage: true });
       throw new Error(`Password field tidak ditemukan. URL: ${page.url()}`);
     }
 
@@ -141,10 +117,10 @@ export async function registerAccount(account, opts = {}) {
 
     const clicked = await clickButton(page, ["continue", "lanjut", "next"]);
     if (!clicked) await page.keyboard.press("Enter");
-    log(2, "Password diisi → OTP akan dikirim ke email", "ok");
+    progress(2, "Password diisi → OTP dikirim ke email");
 
     // ── Step 3: Tunggu & isi OTP ──────────────────────────────────────────
-    process.stdout.write(`  [3/${TOTAL_STEPS}] … Tunggu halaman OTP`);
+    progress(3, "Menunggu halaman OTP...");
 
     const otpFound = await waitForAnySelector(
       page,
@@ -158,12 +134,10 @@ export async function registerAccount(account, opts = {}) {
     );
 
     if (!otpFound) {
-      await page.screenshot({ path: "debug-no-otp.png", fullPage: true });
       throw new Error(`OTP field tidak ditemukan. URL: ${page.url()}`);
     }
 
-    log(3, "Halaman OTP muncul!");
-
+    progress(3, "Menunggu kode OTP dari email...");
     const otpCode = await askOtpFn(email);
 
     await page.click(otpFound.selector, { clickCount: 3 });
@@ -187,10 +161,10 @@ export async function registerAccount(account, opts = {}) {
       page.waitForSelector('input[name="name"]', { timeout: 20000 }),
     ]).catch(() => {});
 
-    log(3, "OTP valid!", "ok");
+    progress(3, "OTP valid ✓");
 
     // ── Step 4: Isi nama & tanggal lahir ─────────────────────────────────
-    process.stdout.write(`  [4/${TOTAL_STEPS}] … Isi nama & tanggal lahir`);
+    progress(4, "Mengisi nama & tanggal lahir...");
     await sleep(1500);
 
     const nameEl = await page.$('input[name="name"]').catch(() => null);
@@ -252,10 +226,10 @@ export async function registerAccount(account, opts = {}) {
       .catch(() => {});
 
     await sleep(2000);
-    log(4, `Profil → ${fullName}, lahir ${birthdateDisplay}`, "ok");
+    progress(4, `Profil: ${fullName}, lahir ${birthdateDisplay}`);
 
     // ── Step 5: Ambil session credentials ────────────────────────────────
-    process.stdout.write(`  [5/${TOTAL_STEPS}] … Ambil session credentials`);
+    progress(5, "Mengambil session credentials...");
 
     if (!page.url().includes("chatgpt.com")) {
       await page.goto("https://chatgpt.com", {
@@ -287,17 +261,13 @@ export async function registerAccount(account, opts = {}) {
         accessToken: session.accessToken,
         expires: session.expires,
       };
-      log(
-        5,
-        `Session OK - plan: ${session.account?.planType || "free"} 🎉`,
-        "ok",
-      );
+      progress(5, `Session OK — plan: ${session.account?.planType || "free"}`);
     } else {
-      log(5, "Session tidak diperoleh (akun tetap tersimpan)", "ok");
+      progress(5, "Session tidak diperoleh (akun tetap tersimpan)");
     }
 
     // ── Step 6: Selesai ───────────────────────────────────────────────────
-    log(6, "Akun selesai dibuat - browser ditutup ✅", "ok");
+    progress(6, "Berhasil ✅");
 
     return { ...account, birthdate, status: "verified", ...sessionData };
   } finally {

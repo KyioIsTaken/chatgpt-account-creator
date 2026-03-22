@@ -1,35 +1,32 @@
 /**
  * config.js
- * Semua konstanta dan konfigurasi terpusat di sini.
- * Untuk mengubah perilaku aplikasi, cukup edit file ini.
+ * Thin wrapper yang membaca config.json dan mengekspor semua konstanta.
+ * Untuk mengubah konfigurasi, edit file config.json di root project.
  */
 
-import "dotenv/config";
+import { readFileSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 
-// ─── Akun ────────────────────────────────────────────────────────────────────
-/** Password yang digunakan untuk semua akun */
-export const PASSWORD = "@Gopretstudio88";
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const raw = readFileSync(resolve(__dirname, "../config.json"), "utf-8");
+const config = JSON.parse(raw);
 
-/** Domain email (dari .env, default: plexai.xyz) */
-export const DOMAINS = (process.env.DOMAINS || "plexai.xyz")
-  .split(",")
-  .map((d) => d.trim())
-  .filter(Boolean);
+// ─── Akun ─────────────────────────────────────────────────────────────────────
+export const PASSWORD = config.password;
+export const DOMAINS = config.domains;
 
-// ─── Proses ──────────────────────────────────────────────────────────────────
-/** Jumlah akun yang diproses secara bersamaan */
-export const BATCH_SIZE = 5;
+// ─── Proses ───────────────────────────────────────────────────────────────────
+export const BATCH_SIZE = config.batchSize;
+export const HEADLESS = config.headless;
 
-/** Maksimal percobaan ulang jika satu slot gagal */
-export const MAX_RETRY = 3;
-
-// ─── OTP ─────────────────────────────────────────────────────────────────────
-/** Maksimal waktu tunggu OTP (ms) */
-export const OTP_TIMEOUT = 90_000;
-
-/** Interval polling inbox (ms) */
-export const OTP_POLL = 4_000;
+// ─── OTP ──────────────────────────────────────────────────────────────────────
+export const OTP_TIMEOUT = config.otp.timeout;
+export const OTP_POLL = config.otp.pollInterval;
+export const OTP_API_URL = config.otp.apiUrl;
+export const OTP_API_KEY = config.otp.apiKey;
 
 // ─── File Path ────────────────────────────────────────────────────────────────
-export const ACCOUNTS_FILE = "./data/accounts.json";
-export const RESULT_FILE = "./data/result.txt";
+export const ACCOUNTS_FILE = config.paths.accounts;
+export const RESULT_FILE = config.paths.result;
+export const EMAIL_DB_FILE = config.paths.emailDb;

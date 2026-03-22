@@ -7,18 +7,18 @@
  * 2. Poll inbox tiap beberapa detik sampai email OTP masuk
  * 3. Extract kode 6 digit dari subject/snippet
  * 4. Return kode OTP
+ *
+ * Mode silent: tidak menulis ke stdout (agar tidak mengganggu progress bar).
  */
 
-import { OTP_TIMEOUT, OTP_POLL } from "../config.js";
+import { OTP_TIMEOUT, OTP_POLL, OTP_API_URL, OTP_API_KEY } from "../config.js";
 
-const BASE_URL = "https://mail.gopretstudio.com";
-const API_KEY = "GOMAIL-FqcmbaAGbPnwHIxKElNq";
-const HEADERS = { "x-api-key": API_KEY };
+const HEADERS = { "x-api-key": OTP_API_KEY };
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
 async function apiGet(path) {
-  const res = await fetch(`${BASE_URL}${path}`, { headers: HEADERS });
+  const res = await fetch(`${OTP_API_URL}${path}`, { headers: HEADERS });
   if (!res.ok) throw new Error(`API error ${res.status}: ${path}`);
   return res.json();
 }
@@ -63,9 +63,7 @@ export async function waitForOtp(email) {
     throw new Error(`Format email tidak valid: ${email}`);
 
   const startTime = Date.now();
-  const minDate = new Date(startTime - 30_000); // abaikan email > 30 detik lalu
-
-  process.stdout.write(`\n  📬 Menunggu OTP untuk ${email}...\n`);
+  const minDate = new Date(startTime - 30_000);
 
   while (Date.now() - startTime < OTP_TIMEOUT) {
     try {
@@ -80,7 +78,6 @@ export async function waitForOtp(email) {
           if ((isFromOpenAI || isOtpSubject) && isFresh) {
             const otp = extractOtp(msg);
             if (otp) {
-              process.stdout.write(`  ✅ OTP diterima: ${otp}\n`);
               return otp;
             }
           }
@@ -89,12 +86,10 @@ export async function waitForOtp(email) {
     } catch {
       // silent retry
     }
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-    process.stdout.write(`\r  ⏳ Menunggu OTP... ${elapsed}s   `);
     await new Promise((r) => setTimeout(r, OTP_POLL));
   }
 
   throw new Error(
-    `OTP tidak diterima setelah ${OTP_TIMEOUT / 1000}s. Cek inbox ${email} manual.`,
+    `OTP tidak diterima setelah ${OTP_TIMEOUT / 1000}s.`,
   );
 }

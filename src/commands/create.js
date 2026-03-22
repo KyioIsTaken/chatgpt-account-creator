@@ -1,53 +1,179 @@
 /**
  * commands/create.js
- * Command: npm run create -- [N] [--email x@y]
+ * Command: npm run create
  * Buat N akun ChatGPT secara parallel (max BATCH_SIZE sekaligus).
+ *
+ * Fitur:
+ * - Tanya jumlah akun via prompt interaktif
+ * - Input nama tambahan opsional (ditambahkan ke email username)
+ * - Hapus data lama (accounts.json & result.txt) — tapi BUKAN email-db.json
+ * - Cek email unik via LocalDB sebelum proses
+ * - Auto-retry tanpa batas jika gagal (buat akun baru otomatis)
+ * - Live progress bar per-slot
+ * - Auto-convert ke result.txt setelah selesai
  */
 
 import chalk from "chalk";
 import readline from "readline";
+import { writeFileSync, existsSync, unlinkSync } from "fs";
+import { resolve } from "path";
 import Table from "cli-table3";
-import { BATCH_SIZE, MAX_RETRY } from "../config.js";
-import { generateAccounts } from "../lib/email-gen.js";
-import { registerAccount } from "../lib/register.js";
+import { BATCH_SIZE, RESULT_FILE } from "../config.js";
+import { generateAccount } from "../lib/email-gen.js";
+import { registerAccount, TOTAL_STEPS } from "../lib/register.js";
 import { waitForOtp } from "../lib/otp.js";
-import { saveAccount } from "../lib/storage.js";
+import {
+  saveAccount,
+  clearAccounts,
+  isEmailUsed,
+  saveEmailToDb,
+} from "../lib/storage.js";
 
-// ─── OTP: auto-fetch, fallback ke input manual ────────────────────────────────
-async function getOtp(email) {
-  try {
-    return await waitForOtp(email);
-  } catch (err) {
-    console.log(chalk.yellow(`\n  ⚠️  Auto-OTP gagal (${err.message})`));
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    return new Promise((resolve) =>
-      rl.question(
-        chalk.yellow(`  🔑 Masukkan OTP manual untuk ${chalk.bold(email)}: `),
-        (ans) => {
-          rl.close();
-          resolve(ans.trim());
-        },
-      ),
-    );
+// ─── Helper: Prompt input dari user ────────────────────────────────────────────
+function askQuestion(question) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise((resolve) =>
+    rl.question(question, (ans) => {
+      rl.close();
+      resolve(ans.trim());
+    }),
+  );
+}
+
+// ─── Generate email unik (cek LocalDB) ───────────────────────────────────────
+function generateUniqueAccount(emailSuffix = "") {
+  let account;
+  let attempts = 0;
+  do {
+    account = generateAccount(emailSuffix);
+    attempts++;
+    if (attempts > 100) break; // safety net
+  } while (isEmailUsed(account.email));
+  return account;
+}
+
+// ─── Progress Bar Renderer ────────────────────────────────────────────────────
+
+const BAR_WIDTH = 20;
+const EMAIL_WIDTH = 28;
+const STATUS_WIDTH = 45;
+
+function renderBar(step, total) {
+  const pct = Math.round((step / total) * 100);
+  const filled = Math.round((step / total) * BAR_WIDTH);
+  const empty = BAR_WIDTH - filled;
+  const bar = "█".repeat(filled) + "░".repeat(empty);
+
+  if (pct === 100) return chalk.green(`${bar} ${pct}%`);
+  if (pct >= 50) return chalk.yellow(`${bar} ${pct}%`);
+  return chalk.cyan(`${bar} ${pct}%`);
+}
+
+function truncate(str, maxLen) {
+  if (str.length <= maxLen) return str.padEnd(maxLen);
+  return str.slice(0, maxLen - 1) + "…";
+}
+
+class LiveDisplay {
+  constructor(slotCount) {
+    this.slotCount = slotCount;
+    this.slots = Array.from({ length: slotCount }, () => ({
+      email: "—",
+      step: 0,
+      status: "Menunggu...",
+      done: false,
+    }));
+    this.rendered = false;
   }
+
+  update(slotIdx, data) {
+    Object.assign(this.slots[slotIdx], data);
+    this.render();
+  }
+
+  render() {
+    if (this.rendered) {
+      process.stdout.write(`\x1B[${this.slotCount + 1}A`);
+    }
+
+    process.stdout.write(
+      `\x1B[2K${chalk.gray("─".repeat(EMAIL_WIDTH + BAR_WIDTH + STATUS_WIDTH + 16))}\n`,
+    );
+
+    for (let i = 0; i < this.slotCount; i++) {
+      const s = this.slots[i];
+      const emailStr = truncate(s.email, EMAIL_WIDTH);
+      const bar = renderBar(s.step, TOTAL_STEPS);
+      const statusStr = truncate(s.status, STATUS_WIDTH);
+
+      let icon;
+      if (s.done) icon = chalk.green("✅");
+      else if (s.step > 0) icon = chalk.yellow("⏳");
+      else icon = chalk.gray("⏸ ");
+
+      process.stdout.write(
+        `\x1B[2K  ${icon} ${chalk.white.bold(emailStr)} │ ${bar} │ ${s.done ? chalk.green(statusStr) : chalk.gray(statusStr)}\n`,
+      );
+    }
+
+    this.rendered = true;
+  }
+}
+
+// ─── OTP: auto-fetch saja ─────────────────────────────────────────────────────
+async function getOtp(email) {
+  return await waitForOtp(email);
+}
+
+// ─── Auto-convert ke result.txt ───────────────────────────────────────────────
+function autoConvert(allResults) {
+  if (allResults.length === 0) return;
+  const lines = allResults.map(
+    (acc) => `${acc.email}\t${acc.fullName || acc.firstName || "-"}`,
+  );
+  writeFileSync(resolve(RESULT_FILE), lines.join("\n"), "utf-8");
+  console.log(
+    chalk.green(`\n📄 ${allResults.length} akun diekspor ke ${RESULT_FILE}`),
+  );
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export async function cmdCreate(args) {
-  let count = 1;
-  let specificEmail = null;
+  // ─── Tanya jumlah akun ─────────────────────────────────────────────────
+  const countInput = await askQuestion(
+    chalk.yellow(`\n🔢 Mau buat berapa akun? `),
+  );
+  const count = Math.max(1, parseInt(countInput) || 1);
 
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--email" && args[i + 1]) {
-      specificEmail = args[i + 1];
-      count = 1;
-    } else if (!isNaN(parseInt(args[i])) && parseInt(args[i]) > 0) {
-      count = parseInt(args[i]);
-    }
+  // ─── Tanya nama tambahan untuk email ───────────────────────────────────
+  const emailSuffix = await askQuestion(
+    chalk.yellow(
+      `📝 Apakah ada penambahan nama di belakang email? (kosongkan jika tidak): `,
+    ),
+  );
+
+  if (emailSuffix) {
+    console.log(
+      chalk.green(
+        `  ✓ Suffix email: "${emailSuffix}" → contoh: abc123${emailSuffix}@domain.xyz`,
+      ),
+    );
+  } else {
+    console.log(
+      chalk.gray(`  ✓ Email tanpa tambahan → contoh: abc1234567@domain.xyz`),
+    );
   }
+
+  // ─── Hapus data lama (BUKAN email-db.json) ─────────────────────────────
+  await clearAccounts();
+  const resultPath = resolve(RESULT_FILE);
+  if (existsSync(resultPath)) unlinkSync(resultPath);
+  console.log(
+    chalk.gray(`\n  🗑️  Data lama dihapus (accounts.json & result.txt)`),
+  );
 
   console.log(
     chalk.yellow(
@@ -66,6 +192,7 @@ export async function cmdCreate(args) {
   );
 
   let totalSuccess = 0;
+  const allResults = [];
 
   for (let bIdx = 0; bIdx < batches.length; bIdx++) {
     const batch = batches[bIdx];
@@ -74,53 +201,68 @@ export async function cmdCreate(args) {
         `\n═══ Batch ${bIdx + 1}/${batches.length} (${batch.length} akun) ${"═".repeat(20)}`,
       ),
     );
+    console.log();
+
+    const display = new LiveDisplay(batch.length);
+    display.render();
 
     const results = await Promise.allSettled(
-      batch.map(async (slotIdx) => {
-        let attempt = 0;
-        while (attempt < MAX_RETRY) {
-          attempt++;
-          const base = generateAccounts(1)[0];
-          const account = specificEmail
-            ? { ...base, email: specificEmail }
-            : base;
-          const prefix = chalk.gray(`  [Slot ${slotIdx + 1}]`);
-          if (attempt > 1)
-            console.log(prefix + chalk.yellow(` 🔄 Retry ke-${attempt}...`));
+      batch.map(async (slotIdx, localIdx) => {
+        while (true) {
+          // Generate email unik (cek LocalDB)
+          const account = generateUniqueAccount(emailSuffix);
+
+          display.update(localIdx, {
+            email: account.email,
+            step: 0,
+            status: "Memulai registrasi...",
+            done: false,
+          });
+
           try {
-            const result = await registerAccount(account, { askOtpFn: getOtp });
+            const result = await registerAccount(account, {
+              askOtpFn: getOtp,
+              onProgress: (step, msg) => {
+                display.update(localIdx, { step, status: msg });
+              },
+            });
             await saveAccount(result);
-            console.log(
-              prefix + chalk.green(` ✅ ${account.email} - berhasil!`),
-            );
+            // Simpan email ke LocalDB (persistent)
+            await saveEmailToDb(account.email);
+
+            display.update(localIdx, {
+              step: TOTAL_STEPS,
+              status: "Berhasil ✅",
+              done: true,
+            });
+
             return result;
-          } catch (err) {
-            console.log(
-              prefix +
-                chalk.red(
-                  ` ❌ Gagal (${attempt}/${MAX_RETRY}): ${err.message}`,
-                ),
+          } catch {
+            display.update(localIdx, {
+              step: 0,
+              status: "Membuat akun baru...",
+              done: false,
+            });
+            await new Promise((r) =>
+              setTimeout(r, 3000 + Math.random() * 2000),
             );
-            if (attempt < MAX_RETRY)
-              await new Promise((r) =>
-                setTimeout(r, 3000 + Math.random() * 2000),
-              );
           }
         }
-        throw new Error(
-          `Slot ${slotIdx + 1} gagal setelah ${MAX_RETRY}x retry`,
-        );
       }),
     );
 
-    const batchSuccess = results.filter((r) => r.status === "fulfilled").length;
-    const batchFailed = results.filter((r) => r.status === "rejected").length;
+    const batchSuccess = results.filter(
+      (r) => r.status === "fulfilled",
+    ).length;
     totalSuccess += batchSuccess;
+
+    results.forEach((r) => {
+      if (r.status === "fulfilled") allResults.push(r.value);
+    });
 
     console.log(
       chalk.cyan(`\n  Batch ${bIdx + 1} selesai: `) +
-        chalk.green(`✅ ${batchSuccess} berhasil`) +
-        (batchFailed > 0 ? chalk.red(` | ⛔ ${batchFailed} gagal`) : ""),
+        chalk.green(`✅ ${batchSuccess} berhasil`),
     );
 
     if (bIdx < batches.length - 1) {
@@ -134,21 +276,47 @@ export async function cmdCreate(args) {
     }
   }
 
-  // Ringkasan
-  const table = new Table({
-    head: [
-      chalk.cyan.bold("TOTAL"),
-      chalk.green.bold("✅ BERHASIL"),
-      chalk.red.bold("⛔ GAGAL"),
-    ],
+  // ─── Ringkasan akhir ──────────────────────────────────────────────────
+  console.log(
+    chalk.cyan.bold(
+      `\n${"═".repeat(60)}\n  📊 RINGKASAN\n${"═".repeat(60)}`,
+    ),
+  );
+
+  const summaryTable = new Table({
+    head: [chalk.cyan.bold("TOTAL"), chalk.green.bold("✅ BERHASIL")],
     style: { head: [], border: ["cyan"] },
-    colWidths: [12, 16, 14],
+    colWidths: [12, 16],
   });
-  table.push([count, totalSuccess, count - totalSuccess]);
-  console.log("\n" + table.toString());
+  summaryTable.push([count, totalSuccess]);
+  console.log("\n" + summaryTable.toString());
+
+  if (allResults.length > 0) {
+    console.log(chalk.cyan.bold(`\n  📋 Detail Akun:`));
+    const detailTable = new Table({
+      head: [
+        chalk.cyan.bold("#"),
+        chalk.cyan.bold("EMAIL"),
+        chalk.cyan.bold("PASSWORD"),
+        chalk.cyan.bold("NAMA"),
+      ],
+      style: { head: [], border: ["cyan"] },
+      colWidths: [5, 30, 20, 22],
+    });
+    allResults.forEach((acc, i) => {
+      detailTable.push([i + 1, acc.email, acc.password, acc.fullName]);
+    });
+    console.log(detailTable.toString());
+  }
+
+  // ─── Auto-convert ke result.txt ────────────────────────────────────────
+  autoConvert(allResults);
+
   console.log(
     chalk.gray("\n💾 Akun tersimpan di: ") +
       chalk.cyan("data/accounts.json") +
+      chalk.gray(" & ") +
+      chalk.cyan("data/result.txt") +
       "\n",
   );
 }
