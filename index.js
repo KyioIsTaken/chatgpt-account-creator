@@ -44,7 +44,6 @@ const [, , command, ...args] = process.argv;
 try {
   switch (command) {
     case "create":
-      banner();
       await cmdCreate(args);
       break;
     case "convert":
